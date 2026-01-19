@@ -1,29 +1,50 @@
-# 🔐 Sealed Secrets (kubeseal) – Complete Setup & Test Guide
+# 🔐 Sealed Secrets (kubeseal) – Secure GKE-Compatible Setup & Usage Guide
 
-This guide walks through:
+This guide explains how to install and use **Sealed Secrets** in a **hardened, production-safe configuration** that is compatible with:
 
-1. Installing the Sealed Secrets controller using Helm (with resource requests & limits)
-2. Installing the kubeseal CLI on the host machine
+- ✅ GKE Autopilot
+- ✅ GKE Standard (restricted clusters)
+- ✅ GitOps (ArgoCD / Flux)
+- ✅ Multi-team, zero-trust environments
+
+This setup **avoids cluster-wide privileges** and follows **least-privilege security principles**.
+
+---
+
+## 📌 What This Guide Covers
+
+1. Installing the Sealed Secrets controller (secure Helm install)
+2. Installing the `kubeseal` CLI
 3. Fetching the public encryption key
-4. Creating a Kubernetes Secret (dry-run)
-5. Encrypting the Secret into a SealedSecret
-6. Deploying it into the cluster
-7. Verifying that decryption worked correctly
+4. Creating a Kubernetes Secret (dry run)
+5. Encrypting the Secret using **namespace scope**
+6. Deploying the SealedSecret
+7. Verifying that decryption worked
+8. Understanding **scope** and **security guarantees**
 
-This flow works for:
-- Local Kubernetes clusters
-- Killercoda playgrounds
-- GKE Autopilot
-- ArgoCD / GitOps setups
+---
+
+## 🔐 Why This Setup Is Safer (Important)
+
+Unlike the default installation, this setup:
+
+- ❌ Does **not** create ClusterRoles or ClusterRoleBindings
+- ❌ Does **not** allow cluster-wide secret reuse
+- ❌ Does **not** bind to `system:authenticated`
+- ✅ Limits secrets to a **single namespace**
+- ✅ Reduces blast radius if a secret file leaks
+- ✅ Is compliant with GKE Autopilot security rules
+
+> **Result:** Even if someone steals a sealed secret file, it cannot be decrypted outside its intended namespace.
 
 ---
 
 ## 📌 Prerequisites
 
 - Kubernetes cluster access
-- kubectl configured and working
-- helm installed
-- Cluster-admin (or equivalent) permissions
+- `kubectl` configured and working
+- `helm` installed
+- Namespace-level permissions are sufficient (cluster-admin NOT required)
 
 Verify:
 ```bash
@@ -33,25 +54,38 @@ helm version
 
 ---
 
-## 1️⃣ Install Sealed Secrets Controller using Helm
+## 1️⃣ Install Sealed Secrets Controller (Secure Helm Install)
 
-Add the Helm repository:
+### Add Helm repository
 
 ```bash
 helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
 helm repo update
 ```
 
-Install the controller in kube-system with resource requests & limits:
+### Install controller (Hardened Configuration)
 
 ```bash
-helm install sealed-secrets sealed-secrets/sealed-secrets   -n kube-system --create-namespace   --set fullnameOverride=sealed-secrets-controller   --set-string webhooks.tlsSecretName=sealed-secrets-tls   --set resources.requests.cpu=100m   --set resources.requests.memory=128Mi   --set resources.limits.cpu=100m   --set resources.limits.memory=128Mi   --wait
+helm install sealed-secrets sealed-secrets/sealed-secrets \
+  -n sealed-secrets --create-namespace \
+  --set fullnameOverride=sealed-secrets-controller \
+  --set-string webhooks.tlsSecretName=sealed-secrets-tls \
+  --set rbac.create=true \
+  --set rbac.createClusterRole=false \
+  --set rbac.createClusterRoleBinding=false \
+  --set rbac.serviceProxier.create=false \
+  --set rbac.serviceProxier.bind=false \
+  --set resources.requests.cpu=100m \
+  --set resources.requests.memory=128Mi \
+  --set resources.limits.cpu=100m \
+  --set resources.limits.memory=128Mi \
+  --wait
 ```
 
-Verify controller:
+### Verify controller
 
 ```bash
-kubectl get pods -n kube-system | grep sealed
+kubectl get pods -n sealed-secrets | grep sealed
 ```
 
 ---
@@ -65,33 +99,42 @@ sudo install -m 755 kubeseal /usr/local/bin/kubeseal
 ```
 
 Verify:
-
 ```bash
 kubeseal --version
 ```
 
 ---
 
-## 3️⃣ Fetch the Public Key
+## 3️⃣ Fetch the Public Encryption Key
 
 ```bash
-kubeseal   --controller-name=sealed-secrets-controller   --controller-namespace=kube-system   --fetch-cert > sealed-secrets-public.pem
+kubeseal \
+  --controller-name sealed-secrets-controller \
+  --controller-namespace sealed-secrets \
+  --fetch-cert > sealed-secrets-public.pem
 ```
 
 ---
 
-## 4️⃣ Create a Secret (Dry Run)
+## 4️⃣ Create a Kubernetes Secret (Dry Run)
 
 ```bash
-kubectl create secret generic app-secret   --from-literal=API_KEY=killercoda-test   -n default   --dry-run=client -o yaml > secret.yaml
+kubectl create secret generic app-secret \
+  --from-literal=API_KEY=killercoda-test \
+  -n default \
+  --dry-run=client -o yaml > secret.yaml
 ```
 
 ---
 
-## 5️⃣ Encrypt the Secret
+## 5️⃣ Encrypt the Secret (IMPORTANT: Scope Explained)
 
 ```bash
-kubeseal   --cert sealed-secrets-public.pem   --namespace default   --format yaml   < secret.yaml > sealed-secret.yaml
+kubeseal \
+  --cert sealed-secrets-public.pem \
+  --scope namespace-wide \
+  --format yaml \
+  < secret.yaml > sealed-secret.yaml
 ```
 
 ---
@@ -104,23 +147,16 @@ kubectl apply -f sealed-secret.yaml
 
 ---
 
-## 7️⃣ Verify Decryption
-
-Check secret:
+## 7️⃣ Verify That Decryption Worked
 
 ```bash
 kubectl get secret app-secret -n default
-```
-
-Decode value (testing only):
-
-```bash
-kubectl get secret app-secret -n default   -o jsonpath='{.data.API_KEY}' | base64 --decode
+kubectl get secret app-secret -n default -o jsonpath='{.data.API_KEY}' | base64 --decode && echo
 ```
 
 ---
 
-## 8️⃣ Verify via Pod (Recommended)
+## 8️⃣ Verify Using a Pod (Recommended)
 
 ```yaml
 apiVersion: v1
@@ -138,24 +174,12 @@ spec:
         name: app-secret
 ```
 
-Apply and check:
-
-```bash
-kubectl apply -f pod.yaml
-kubectl logs secret-test
-```
-
 ---
 
-## ✅ Summary
+## 🔐 Security Summary
 
-- kubeseal encrypts secrets locally
-- Decryption happens only inside the cluster
-- Private key never leaves kube-system
-- Safe for Git & GitOps workflows
-
----
-
-## 🔑 Final Takeaway
-
-Sealed Secrets allows secure secret management in GitOps by separating encryption (local) and decryption (cluster-only).
+- Secrets encrypted locally
+- Private key stays in cluster
+- Namespace-scoped decryption
+- GitOps safe
+- GKE Autopilot compliant
