@@ -6,10 +6,10 @@ resource "helm_release" "sealed_secrets" {
   chart      = "sealed-secrets"
 
   # 🔒 FIXED chart version (matches cluster)
-  version = "2.18.0"
+  version = var.chart_version
 
   values = [
-    file("${path.module}/values-sealed-secrets.yaml")
+    file(var.values_path)
   ]
 
   wait    = true
