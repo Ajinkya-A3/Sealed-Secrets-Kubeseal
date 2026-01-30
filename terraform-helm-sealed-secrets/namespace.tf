@@ -1,5 +1,5 @@
-resource "kubernetes_namespace" "sealed_secrets" {
+resource "kubernetes_namespace_v1" "sealed_secrets" {
   metadata {
-    name = "sealed-secrets"
+    name = var.namespace
   }
 }

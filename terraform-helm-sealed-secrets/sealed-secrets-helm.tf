@@ -1,6 +1,6 @@
 resource "helm_release" "sealed_secrets" {
   name      = "sealed-secrets"
-  namespace = kubernetes_namespace.sealed_secrets.metadata[0].name
+  namespace = kubernetes_namespace_v1.sealed_secrets.metadata[0].name
 
   repository = "https://bitnami-labs.github.io/sealed-secrets"
   chart      = "sealed-secrets"
@@ -19,6 +19,6 @@ resource "helm_release" "sealed_secrets" {
   recreate_pods = true
 
   depends_on = [
-    kubernetes_namespace.sealed_secrets
+    kubernetes_namespace_v1.sealed_secrets
   ]
 }

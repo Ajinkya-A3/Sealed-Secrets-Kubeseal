@@ -1,5 +1,5 @@
 output "namespace" {
-  value = kubernetes_namespace.sealed_secrets.metadata[0].name
+  value = kubernetes_namespace_v1.sealed_secrets.metadata[0].name
 }
 
 output "helm_release_name" {
